@@ -6,13 +6,115 @@ import adafruit_lis3dh
 import random
 from adafruit_matrixportal.matrix import Matrix
 
+class ScoreDisplay:
+    DIGITS = {
+        0: [
+            [1, 1, 1],
+            [1, 0, 1],
+            [1, 0, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+        ],
+        1: [
+            [0, 1, 0],
+            [0, 1, 0],
+            [0, 1, 0],
+            [0, 1, 0],
+            [0, 1, 0],
+        ],
+        2: [
+            [1, 1, 1],
+            [0, 0, 1],
+            [1, 1, 1],
+            [1, 0, 0],
+            [1, 1, 1],
+        ],
+        3: [
+            [1, 1, 1],
+            [0, 0, 1],
+            [1, 1, 1],
+            [0, 0, 1],
+            [1, 1, 1],
+        ],
+        4: [
+            [1, 0, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+            [0, 0, 1],
+            [0, 0, 1],
+        ],
+        5: [
+            [1, 1, 1],
+            [1, 0, 0],
+            [1, 1, 1],
+            [0, 0, 1],
+            [1, 1, 1],
+        ],
+        6: [
+            [1, 1, 1],
+            [1, 0, 0],
+            [1, 1, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+        ],
+        7: [
+            [1, 1, 1],
+            [0, 0, 1],
+            [0, 0, 1],
+            [0, 1, 0],
+            [0, 1, 0],
+        ],
+        8: [
+            [1, 1, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+        ],
+        9: [
+            [1, 1, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+            [0, 0, 1],
+            [1, 1, 1],
+        ],
+    }
+
+    def __init__(self, display, palette):
+        self.bitmap = displayio.Bitmap(7, 5, len(palette))
+        self.tile_grid = displayio.TileGrid(self.bitmap, pixel_shader=palette)
+        self.group = displayio.Group()
+        self.group.append(self.tile_grid)
+        self.group.x = 23  # Position on the right side
+        self.group.y = 6
+        display.root_group.append(self.group)
+        self.score = 0
+        self.update_score()
+
+    def draw_digit(self, digit, offset):
+        pattern = self.DIGITS[digit]
+        for y, row in enumerate(pattern):
+            for x, pixel in enumerate(row):
+                self.bitmap[offset + x, y] = 3 if pixel else 0
+
+    def update_score(self):
+        tens = self.score // 10
+        ones = self.score % 10
+        self.draw_digit(tens, 0)
+        self.draw_digit(ones, 4)
+
+    def increment_score(self, lines=1):
+        self.score = (self.score + lines) % 100
+        self.update_score()
+
+
 class NextUp:
     def __init__(self, width, height, palette):
         self.width = width
         self.height = height
         self.palette = palette
 
-        # Create a bitmap with enough space for the border
+        # Create a bitmap without border
         self.bitmap = displayio.Bitmap(self.width, self.height, len(self.palette))
 
         # Create a tile grid for displaying the bitmap
@@ -24,27 +126,14 @@ class NextUp:
         self.group.x = 1  # Position on the screen
         self.group.y = 5
 
-        # Initialize the border
-        self.draw_border()
-
-    def draw_border(self):
-        # Set all border pixels to blue        
-        for x in range(self.width):
-            self.bitmap[x, 0] = 1  # Top border
-            self.bitmap[x, self.height-1] = 1  # Bottom border
-        for y in range(self.height):
-             self.bitmap[0, y] = 1  # Left border
-             self.bitmap[self.width-1 , y] = 1  # Right border
-
     def display_piece(self, shape):
-        # Clear the inside of the grid
-                
-        for x in range(1, self.width-1):
-            for y in range(1, self.height-1):
+        # Clear the grid
+        for x in range(self.width):
+            for y in range(self.height):
                 self.bitmap[x, y] = 0  # Clear to background (assume 0 is background)
 
-        # # Draw the piece shape centered in the grid
-        shape_x_offset = (self.width // 2) - 2
+        # Draw the piece shape shifted right by 2 columns
+        shape_x_offset = (self.width // 2) - 2 + 2  # Shift right by 2
         shape_y_offset = (self.height // 2) - 2
         for dx, dy in shape:
             self.bitmap[shape_x_offset + dx, shape_y_offset + dy] = 2  # Draw using third color
@@ -101,6 +190,7 @@ class TetrisGame:
         self.next_piece = self.get_random_piece()  # Initialize the next piece
         self.current_piece = self.new_piece()  # Initialize the current piece
         self.update_next_piece_display()  # Display the next piece
+        self.score_display = ScoreDisplay(self.display, self.palette)
 
     def setup_display(self, width, height):
         self.matrix = Matrix(width=32, height=32)
@@ -200,41 +290,38 @@ class TetrisGame:
         return False
 
     def clear_full_lines(self):
-        # Step 1: Identify all full lines
         full_lines = []
         for y in range(self.start_y, self.end_y):
             if all(self.bitmap[x, y] == 3 for x in range(self.game_min_x, self.game_max_x)):
                 full_lines.append(y)
 
         num_lines_cleared = len(full_lines)
+        
+        if num_lines_cleared > 0:
+            self.score_display.increment_score(num_lines_cleared)  # Move score increment here
 
-        # Step 2: Blink all full lines based on the number of lines cleared
         for _ in range(num_lines_cleared):
-            for color in [1, 0]:  # Blue, then black
+            for color in [1, 0]:
                 for y in full_lines:
                     for x in range(self.game_min_x, self.game_max_x):
-                        self.bitmap[x, y] = color  # Set cells to blue or black
+                        self.bitmap[x, y] = color
                 self.display.refresh()
-                time.sleep(0.25)  # Shorter blink interval
-
-        # Step 3: Clear the full lines and move all lines above down
+                time.sleep(0.25)
+        
         if full_lines:
             lowest_full_line = min(full_lines)
             highest_full_line = max(full_lines)
 
-            # Move all lines above the highest cleared line down by the number of cleared lines
             for y in range(highest_full_line, self.start_y - 1, -1):
                 source_y = y - num_lines_cleared
                 if source_y >= self.start_y:
                     for x in range(self.game_min_x, self.game_max_x):
                         self.bitmap[x, y] = self.bitmap[x, source_y]
                 else:
-                    # Clear any remaining lines at the top
                     for x in range(self.game_min_x, self.game_max_x):
                         self.bitmap[x, y] = 0
 
             self.display.refresh()
-
 
 
     def freeze_piece(self):
